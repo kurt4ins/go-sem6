@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/kurt4ins/taskmanager/internal/repo"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -130,6 +133,17 @@ func findUser(id int) (*User, bool) {
 }
 
 func main() {
+	db, err := sql.Open("pgx", "postgres://taskmanager:taskmanager@db:5432/taskmanager?sslmode=disable")
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		panic(err)
+	}
+	fmt.Println("connected to a database")
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -271,6 +285,82 @@ func main() {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("user with id %d doesn't exist", id))
 		}
 
+	})
+
+	taskRepo := repo.NewTaskRepo(db)
+
+	mux.HandleFunc("POST /tasks", func(w http.ResponseWriter, r *http.Request) {
+		var data repo.Task
+		if err := readJSON(w, r, &data); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		task, err := taskRepo.Create(r.Context(), data)
+		if err != nil {
+			fmt.Println(err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to create task")
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, task)
+	})
+
+	mux.HandleFunc("GET /tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		strId := r.PathValue("id")
+		id, err := strconv.Atoi(strId)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "invalid id provided")
+			return
+		}
+
+		task, err := taskRepo.GetById(r.Context(), id)
+		if err != nil {
+			fmt.Println(err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to fetch task")
+			return
+		}
+		if task == nil {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("task with id %d doesn't exist", id))
+			return
+		}
+
+		writeJSON(w, http.StatusOK, task)
+	})
+
+	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
+		limit, offset := 20, 0
+
+		if strLimit := r.URL.Query().Get("limit"); strLimit != "" {
+			l, err := strconv.Atoi(strLimit)
+			if err != nil || l <= 0 {
+				writeError(w, http.StatusBadRequest, "invalid limit")
+				return
+			}
+			limit = l
+		}
+
+		if strOffset := r.URL.Query().Get("offset"); strOffset != "" {
+			o, err := strconv.Atoi(strOffset)
+			if err != nil || o < 0 {
+				writeError(w, http.StatusBadRequest, "invalid offset")
+				return
+			}
+			offset = o
+		}
+
+		tasks, err := taskRepo.List(r.Context(), limit, offset)
+		if err != nil {
+			fmt.Println(err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to fetch tasks")
+			return
+		}
+
+		if tasks == nil {
+			tasks = []repo.Task{}
+		}
+
+		writeJSON(w, http.StatusOK, tasks)
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
