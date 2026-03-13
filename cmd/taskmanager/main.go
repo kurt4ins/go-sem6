@@ -37,8 +37,12 @@ func main() {
 	taskH := handlers.NewTaskHandler(taskRepo)
 	userH := handlers.NewUserHandler(userRepo)
 
-	mux.HandleFunc("POST /tasks", taskH.Create)
+	mux.HandleFunc("POST /users/{userId}/tasks", taskH.Create)
+	mux.HandleFunc("GET /users/{userId}/tasks", taskH.ListByUser)
 	mux.HandleFunc("GET /tasks/{id}", taskH.GetById)
+	mux.HandleFunc("PUT /tasks/{id}", taskH.Update)
+	mux.HandleFunc("PATCH /tasks/{id}", taskH.Patch)
+	mux.HandleFunc("DELETE /tasks/{id}", taskH.Delete)
 	mux.HandleFunc("GET /tasks", taskH.List)
 
 	mux.HandleFunc("POST /users", userH.Create)
