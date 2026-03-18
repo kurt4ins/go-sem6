@@ -32,7 +32,8 @@ type TaskRepository interface {
 }
 
 type TaskRepo struct {
-	db *sql.DB
+	db    *sql.DB
+	audit *AuditLogRepo
 }
 
 func NewTaskRepo(db *sql.DB) *TaskRepo {
@@ -106,20 +107,52 @@ func (r *TaskRepo) List(ctx context.Context, limit int, offset int) ([]Task, err
 }
 
 func (r *TaskRepo) Update(ctx context.Context, task Task) (*Task, error) {
-	query := `
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("TaskRepo.Update: %w", err)
+	}
+	defer tx.Commit()
+
+	var oldTask Task
+	query := `select id, user_id, title, description, completed from tasks where id = $1`
+
+	err = tx.QueryRowContext(ctx, query, task.Id).
+		Scan(&oldTask.Id, &oldTask.UserId, &oldTask.Title, &oldTask.Description, &oldTask.Completed)
+
+	if err != nil {
+		tx.Rollback()
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("TaskRepo.Update fetch old: %w", err)
+	}
+
+	query = `
 		update tasks
 		set title = $1, description = $2, completed = $3
 		where id = $4
 		returning id, user_id, title, description, completed
 	`
 
-	err := r.db.QueryRowContext(ctx, query, task.Title, task.Description, task.Completed, task.Id).
+	err = tx.QueryRowContext(ctx, query, task.Title, task.Description, task.Completed, task.Id).
 		Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed)
 	if err != nil {
+		tx.Rollback()
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("TaskRepo.Update: %w", err)
+	}
+
+	if err = r.audit.Log(ctx, tx, AuditLog{
+		Entity:   "task",
+		EntityId: task.Id,
+		Action:   "update",
+		OldData:  toJSON(oldTask),
+		NewData:  toJSON(task),
+	}); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("TaskRepo.Update audit: %w", err)
 	}
 
 	return &task, nil
