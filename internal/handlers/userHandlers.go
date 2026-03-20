@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kurt4ins/taskmanager/internal/repo"
+	"github.com/kurt4ins/taskmanager/internal/utils"
 )
 
 func validateUser(user repo.RequestUser) ([]string, bool) {
@@ -40,68 +41,68 @@ func NewUserHandler(repo repo.UserRepository) *UserHandler {
 
 func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var data repo.RequestUser
-	if err := readJSON(w, r, &data); err != nil {
-		WriteError(w, http.StatusBadRequest, err.Error())
+	if err := utils.ReadJSON(w, r, &data); err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if msg, ok := validateUser(data); !ok {
-		WriteError(w, http.StatusBadRequest, strings.Join(msg, "; "))
+		utils.WriteError(w, http.StatusBadRequest, strings.Join(msg, "; "))
 		return
 	}
 
 	user, err := h.repo.Create(r.Context(), data)
 	if err != nil {
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to create user")
+		utils.WriteError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}
 
-	WriteJSON(w, http.StatusCreated, user)
+	utils.WriteJSON(w, http.StatusCreated, user)
 }
 
 func (h *UserHandler) GetById(w http.ResponseWriter, r *http.Request) {
 	strId := r.PathValue("id")
 	id, err := strconv.Atoi(strId)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid id provided")
+		utils.WriteError(w, http.StatusBadRequest, "invalid id provided")
 		return
 	}
 
 	user, err := h.repo.GetById(r.Context(), id)
 	if err != nil {
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to fetch user")
+		utils.WriteError(w, http.StatusInternalServerError, "failed to fetch user")
 		return
 	}
 	if user == nil {
-		WriteError(w, http.StatusNotFound, fmt.Sprintf("user with id %d doesn't exist", id))
+		utils.WriteError(w, http.StatusNotFound, fmt.Sprintf("user with id %d doesn't exist", id))
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, user)
+	utils.WriteJSON(w, http.StatusOK, user)
 }
 
 func (h *UserHandler) GetByEmail(w http.ResponseWriter, r *http.Request) {
 	email := r.PathValue("email")
 
 	if _, err := mail.ParseAddress(email); err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid email")
+		utils.WriteError(w, http.StatusBadRequest, "invalid email")
 		return
 	}
 
 	user, err := h.repo.GetByEmail(r.Context(), email)
 	if err != nil {
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to fetch user")
+		utils.WriteError(w, http.StatusInternalServerError, "failed to fetch user")
 		return
 	}
 	if user == nil {
-		WriteError(w, http.StatusNotFound, fmt.Sprintf("user with email %s doesn't exist", email))
+		utils.WriteError(w, http.StatusNotFound, fmt.Sprintf("user with email %s doesn't exist", email))
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, user)
+	utils.WriteJSON(w, http.StatusOK, user)
 }
 
 func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +111,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 	if strLimit := r.URL.Query().Get("limit"); strLimit != "" {
 		l, err := strconv.Atoi(strLimit)
 		if err != nil || l <= 0 {
-			WriteError(w, http.StatusBadRequest, "invalid limit")
+			utils.WriteError(w, http.StatusBadRequest, "invalid limit")
 			return
 		}
 		limit = l
@@ -119,7 +120,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 	if strOffset := r.URL.Query().Get("offset"); strOffset != "" {
 		o, err := strconv.Atoi(strOffset)
 		if err != nil || o < 0 {
-			WriteError(w, http.StatusBadRequest, "invalid offset")
+			utils.WriteError(w, http.StatusBadRequest, "invalid offset")
 			return
 		}
 		offset = o
@@ -128,7 +129,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 	users, err := h.repo.List(r.Context(), limit, offset)
 	if err != nil {
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to fetch users")
+		utils.WriteError(w, http.StatusInternalServerError, "failed to fetch users")
 		return
 	}
 
@@ -136,5 +137,5 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 		users = []repo.User{}
 	}
 
-	WriteJSON(w, http.StatusOK, users)
+	utils.WriteJSON(w, http.StatusOK, users)
 }

@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/kurt4ins/taskmanager/internal/middleware"
 	"github.com/kurt4ins/taskmanager/internal/repo"
+	"github.com/kurt4ins/taskmanager/internal/utils"
 )
 
 type TaskHandler struct {
@@ -16,16 +18,30 @@ func NewTaskHandler(repo repo.TaskRepository) *TaskHandler {
 	return &TaskHandler{repo: repo}
 }
 
+func checkOwner(w http.ResponseWriter, r *http.Request, task *repo.Task) bool {
+	userId, ok := middleware.UserIdFromContext(r.Context())
+	if !ok {
+		utils.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	if task.UserId != userId {
+		utils.WriteError(w, http.StatusForbidden, "forbidden")
+		return false
+	}
+
+	return true
+}
+
 func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userId, err := strconv.Atoi(r.PathValue("userId"))
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid user id")
+		utils.WriteError(w, http.StatusBadRequest, "invalid user id")
 		return
 	}
 
 	var data repo.Task
-	if err := readJSON(w, r, &data); err != nil {
-		WriteError(w, http.StatusBadRequest, err.Error())
+	if err := utils.ReadJSON(w, r, &data); err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	data.UserId = userId
@@ -33,104 +49,134 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	task, err := h.repo.Create(r.Context(), data)
 	if err != nil {
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to create task")
+		utils.WriteError(w, http.StatusInternalServerError, "failed to create task")
 		return
 	}
 
-	WriteJSON(w, http.StatusCreated, task)
+	utils.WriteJSON(w, http.StatusCreated, task)
 }
 
 func (h *TaskHandler) GetById(w http.ResponseWriter, r *http.Request) {
 	strId := r.PathValue("id")
 	id, err := strconv.Atoi(strId)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid id provided")
+		utils.WriteError(w, http.StatusBadRequest, "invalid id provided")
 		return
 	}
 
 	task, err := h.repo.GetById(r.Context(), id)
 	if err != nil {
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to fetch task")
+		utils.WriteError(w, http.StatusInternalServerError, "failed to fetch task")
 		return
 	}
 	if task == nil {
-		WriteError(w, http.StatusNotFound, fmt.Sprintf("task with id %d doesn't exist", id))
+		utils.WriteError(w, http.StatusNotFound, fmt.Sprintf("task with id %d doesn't exist", id))
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, task)
+	utils.WriteJSON(w, http.StatusOK, task)
 }
 
 func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid id provided")
+		utils.WriteError(w, http.StatusBadRequest, "invalid id provided")
 		return
 	}
 
 	var data repo.Task
-	if err := readJSON(w, r, &data); err != nil {
-		WriteError(w, http.StatusBadRequest, err.Error())
+	if err := utils.ReadJSON(w, r, &data); err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	data.Id = id
 
-	task, err := h.repo.Update(r.Context(), data)
+	exists, err := h.repo.GetById(r.Context(), id)
 	if err != nil {
-		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to update task")
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if task == nil {
-		WriteError(w, http.StatusNotFound, fmt.Sprintf("task with id %d doesn't exist", id))
+	if exists == nil {
+		utils.WriteError(w, http.StatusNotFound, "task doesn't exist")
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, task)
+	if !checkOwner(w, r, exists) {
+		return
+	}
+
+	task, err := h.repo.Update(r.Context(), data)
+	if err != nil {
+		fmt.Println(err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, "failed to update task")
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusOK, task)
 }
 
 func (h *TaskHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid id provided")
+		utils.WriteError(w, http.StatusBadRequest, "invalid id provided")
 		return
 	}
 
-	var fields repo.PatchTask
-	if err := readJSON(w, r, &fields); err != nil {
-		WriteError(w, http.StatusBadRequest, err.Error())
+	var data repo.PatchTask
+	if err := utils.ReadJSON(w, r, &data); err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	task, err := h.repo.Patch(r.Context(), id, fields)
+	exists, err := h.repo.GetById(r.Context(), id)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if exists == nil {
+		utils.WriteError(w, http.StatusNotFound, "task doesn't exist")
+		return
+	}
+
+	if !checkOwner(w, r, exists) {
+		return
+	}
+
+	task, err := h.repo.Patch(r.Context(), id, data)
 	if err != nil {
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to patch task")
-		return
-	}
-	if task == nil {
-		WriteError(w, http.StatusNotFound, fmt.Sprintf("task with id %d doesn't exist", id))
+		utils.WriteError(w, http.StatusInternalServerError, "failed to patch task")
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, task)
+	utils.WriteJSON(w, http.StatusOK, task)
 }
 
 func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid id provided")
+		utils.WriteError(w, http.StatusBadRequest, "invalid id provided")
+		return
+	}
+
+	exists, err := h.repo.GetById(r.Context(), id)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if exists == nil {
+		utils.WriteError(w, http.StatusNotFound, "task doesn't exist")
+		return
+	}
+
+	if !checkOwner(w, r, exists) {
 		return
 	}
 
 	if err := h.repo.Delete(r.Context(), id); err != nil {
-		if err.Error() == "TaskRepo.Delete: not found" {
-			WriteError(w, http.StatusNotFound, fmt.Sprintf("task with id %d doesn't exist", id))
-			return
-		}
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to delete task")
+		utils.WriteError(w, http.StatusInternalServerError, "failed to delete task")
 		return
 	}
 
@@ -140,7 +186,7 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
 	userId, err := strconv.Atoi(r.PathValue("userId"))
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid user id")
+		utils.WriteError(w, http.StatusBadRequest, "invalid user id")
 		return
 	}
 
@@ -149,7 +195,7 @@ func (h *TaskHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
 	if strLimit := r.URL.Query().Get("limit"); strLimit != "" {
 		l, err := strconv.Atoi(strLimit)
 		if err != nil || l <= 0 {
-			WriteError(w, http.StatusBadRequest, "invalid limit")
+			utils.WriteError(w, http.StatusBadRequest, "invalid limit")
 			return
 		}
 		limit = l
@@ -158,7 +204,7 @@ func (h *TaskHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
 	if strOffset := r.URL.Query().Get("offset"); strOffset != "" {
 		o, err := strconv.Atoi(strOffset)
 		if err != nil || o < 0 {
-			WriteError(w, http.StatusBadRequest, "invalid offset")
+			utils.WriteError(w, http.StatusBadRequest, "invalid offset")
 			return
 		}
 		offset = o
@@ -167,7 +213,7 @@ func (h *TaskHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
 	tasks, err := h.repo.ListByUser(r.Context(), userId, limit, offset)
 	if err != nil {
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to fetch tasks")
+		utils.WriteError(w, http.StatusInternalServerError, "failed to fetch tasks")
 		return
 	}
 
@@ -175,7 +221,7 @@ func (h *TaskHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
 		tasks = []repo.Task{}
 	}
 
-	WriteJSON(w, http.StatusOK, tasks)
+	utils.WriteJSON(w, http.StatusOK, tasks)
 }
 
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +230,7 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	if strLimit := r.URL.Query().Get("limit"); strLimit != "" {
 		l, err := strconv.Atoi(strLimit)
 		if err != nil || l <= 0 {
-			WriteError(w, http.StatusBadRequest, "invalid limit")
+			utils.WriteError(w, http.StatusBadRequest, "invalid limit")
 			return
 		}
 		limit = l
@@ -193,7 +239,7 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	if strOffset := r.URL.Query().Get("offset"); strOffset != "" {
 		o, err := strconv.Atoi(strOffset)
 		if err != nil || o < 0 {
-			WriteError(w, http.StatusBadRequest, "invalid offset")
+			utils.WriteError(w, http.StatusBadRequest, "invalid offset")
 			return
 		}
 		offset = o
@@ -202,7 +248,7 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	tasks, err := h.repo.List(r.Context(), limit, offset)
 	if err != nil {
 		fmt.Println(err.Error())
-		WriteError(w, http.StatusInternalServerError, "failed to fetch tasks")
+		utils.WriteError(w, http.StatusInternalServerError, "failed to fetch tasks")
 		return
 	}
 
@@ -210,5 +256,5 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 		tasks = []repo.Task{}
 	}
 
-	WriteJSON(w, http.StatusOK, tasks)
+	utils.WriteJSON(w, http.StatusOK, tasks)
 }

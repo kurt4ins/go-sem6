@@ -6,13 +6,21 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/caarlos0/env/v11"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/kurt4ins/taskmanager/internal/handlers"
+	"github.com/kurt4ins/taskmanager/internal/middleware"
 	"github.com/kurt4ins/taskmanager/internal/repo"
+	"github.com/kurt4ins/taskmanager/internal/utils"
 )
 
-func connectDB() *sql.DB {
-	db, err := sql.Open("pgx", "postgres://taskmanager:taskmanager@db:5432/taskmanager?sslmode=disable")
+type config struct {
+	JWTSecret   string `env:"JWT_SECRET,required"`
+	DatabaseURL string `env:"DATABASE_URL,required"`
+}
+
+func connectDB(databaseURL string) *sql.DB {
+	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		panic(err)
 	}
@@ -26,7 +34,12 @@ func connectDB() *sql.DB {
 }
 
 func main() {
-	db := connectDB()
+	var cfg config
+	if err := env.Parse(&cfg); err != nil {
+		panic(err)
+	}
+
+	db := connectDB(cfg.DatabaseURL)
 	defer db.Close()
 
 	taskRepo := repo.NewTaskRepo(db)
@@ -36,14 +49,21 @@ func main() {
 
 	taskH := handlers.NewTaskHandler(taskRepo)
 	userH := handlers.NewUserHandler(userRepo)
+	authH := handlers.NewAuthHandler(userRepo, []byte(cfg.JWTSecret))
 
-	mux.HandleFunc("POST /users/{userId}/tasks", taskH.Create)
+	auth := middleware.Auth([]byte(cfg.JWTSecret))
+
+	mux.HandleFunc("POST /auth/login", authH.Login)
+	mux.HandleFunc("POST /auth/refresh", authH.Refresh)
+
 	mux.HandleFunc("GET /users/{userId}/tasks", taskH.ListByUser)
 	mux.HandleFunc("GET /tasks/{id}", taskH.GetById)
-	mux.HandleFunc("PUT /tasks/{id}", taskH.Update)
-	mux.HandleFunc("PATCH /tasks/{id}", taskH.Patch)
-	mux.HandleFunc("DELETE /tasks/{id}", taskH.Delete)
 	mux.HandleFunc("GET /tasks", taskH.List)
+
+	mux.Handle("POST /users/{userId}/tasks", auth(http.HandlerFunc(taskH.Create)))
+	mux.Handle("PUT /tasks/{id}", auth(http.HandlerFunc(taskH.Update)))
+	mux.Handle("PATCH /tasks/{id}", auth(http.HandlerFunc(taskH.Patch)))
+	mux.Handle("DELETE /tasks/{id}", auth(http.HandlerFunc(taskH.Delete)))
 
 	mux.HandleFunc("POST /users", userH.Create)
 	mux.HandleFunc("GET /users/{id}", userH.GetById)
@@ -51,11 +71,11 @@ func main() {
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]string{"status": "ok"}
-		handlers.WriteJSON(w, http.StatusOK, data)
+		utils.WriteJSON(w, http.StatusOK, data)
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handlers.WriteError(w, http.StatusNotFound, "page not found")
+		utils.WriteError(w, http.StatusNotFound, "page not found")
 	})
 
 	server := &http.Server{Addr: ":8080", Handler: mux, ReadHeaderTimeout: 5 * time.Second}

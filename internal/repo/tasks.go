@@ -37,7 +37,7 @@ type TaskRepo struct {
 }
 
 func NewTaskRepo(db *sql.DB) *TaskRepo {
-	return &TaskRepo{db: db}
+	return &TaskRepo{db: db, audit: NewAuditLogRepo(db)}
 }
 
 func (r *TaskRepo) Create(ctx context.Context, task Task) (*Task, error) {

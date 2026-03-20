@@ -16,9 +16,10 @@ type RequestUser struct {
 }
 
 type User struct {
-	Id    int    `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	Id           int    `json:"id"`
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	PasswordHash string `json:"-"`
 }
 
 type UserRepository interface {
@@ -76,10 +77,10 @@ func (r *UserRepo) GetById(ctx context.Context, id int) (*User, error) {
 }
 
 func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*User, error) {
-	query := `select id, name from users where email = $1`
+	query := `select id, name, password from users where email = $1`
 	user := User{Email: email}
 
-	err := r.db.QueryRowContext(ctx, query, email).Scan(&user.Id, &user.Name)
+	err := r.db.QueryRowContext(ctx, query, email).Scan(&user.Id, &user.Name, &user.PasswordHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
