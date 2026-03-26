@@ -9,6 +9,7 @@ import (
 	"github.com/caarlos0/env/v11"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/kurt4ins/taskmanager/internal/handlers"
+	"github.com/kurt4ins/taskmanager/internal/indexer"
 	"github.com/kurt4ins/taskmanager/internal/middleware"
 	"github.com/kurt4ins/taskmanager/internal/repo"
 	"github.com/kurt4ins/taskmanager/internal/utils"
@@ -45,9 +46,11 @@ func main() {
 	taskRepo := repo.NewTaskRepo(db)
 	userRepo := repo.NewUserRepo(db)
 
+	idx := indexer.New(taskRepo, 100, 2)
+
 	mux := http.NewServeMux()
 
-	taskH := handlers.NewTaskHandler(taskRepo)
+	taskH := handlers.NewTaskHandler(taskRepo, idx)
 	userH := handlers.NewUserHandler(userRepo)
 	authH := handlers.NewAuthHandler(userRepo, []byte(cfg.JWTSecret))
 

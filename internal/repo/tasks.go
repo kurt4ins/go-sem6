@@ -13,6 +13,7 @@ type Task struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Completed   bool   `json:"completed"`
+	WordCount   *int   `json:"word_count"`
 }
 
 type PatchTask struct {
@@ -44,11 +45,11 @@ func (r *TaskRepo) Create(ctx context.Context, task Task) (*Task, error) {
 	query := `
 		insert into tasks (user_id, title, description, completed)
 		values ($1, $2, $3, $4)
-		returning id, user_id, title, description, completed
+		returning id, user_id, title, description, completed, word_count
 	`
 
 	err := r.db.QueryRowContext(ctx, query, task.UserId, task.Title, task.Description, task.Completed).
-		Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed)
+		Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed, &task.WordCount)
 	if err != nil {
 		return nil, fmt.Errorf("TaskRepo.Create: %w", err)
 	}
@@ -57,11 +58,11 @@ func (r *TaskRepo) Create(ctx context.Context, task Task) (*Task, error) {
 }
 
 func (r *TaskRepo) GetById(ctx context.Context, id int) (*Task, error) {
-	query := `select user_id, title, description, completed from tasks where id = $1`
+	query := `select user_id, title, description, completed, word_count from tasks where id = $1`
 
 	task := Task{Id: id}
 	err := r.db.QueryRowContext(ctx, query, id).
-		Scan(&task.UserId, &task.Title, &task.Description, &task.Completed)
+		Scan(&task.UserId, &task.Title, &task.Description, &task.Completed, &task.WordCount)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -79,7 +80,7 @@ func (r *TaskRepo) List(ctx context.Context, limit int, offset int) ([]Task, err
 	}
 
 	query := `
-		select id, user_id, title, description, completed from tasks
+		select id, user_id, title, description, completed, word_count from tasks
 		order by id
 		limit $1 offset $2
 	`
@@ -93,7 +94,7 @@ func (r *TaskRepo) List(ctx context.Context, limit int, offset int) ([]Task, err
 	var tasks []Task
 	for rows.Next() {
 		var task Task
-		if err := rows.Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed); err != nil {
+		if err := rows.Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed, &task.WordCount); err != nil {
 			return nil, fmt.Errorf("TaskRepo.List scan: %w", err)
 		}
 		tasks = append(tasks, task)
@@ -114,10 +115,10 @@ func (r *TaskRepo) Update(ctx context.Context, task Task) (*Task, error) {
 	defer tx.Commit()
 
 	var oldTask Task
-	query := `select id, user_id, title, description, completed from tasks where id = $1`
+	query := `select id, user_id, title, description, completed, word_count from tasks where id = $1`
 
 	err = tx.QueryRowContext(ctx, query, task.Id).
-		Scan(&oldTask.Id, &oldTask.UserId, &oldTask.Title, &oldTask.Description, &oldTask.Completed)
+		Scan(&oldTask.Id, &oldTask.UserId, &oldTask.Title, &oldTask.Description, &oldTask.Completed, &oldTask.WordCount)
 
 	if err != nil {
 		tx.Rollback()
@@ -131,11 +132,11 @@ func (r *TaskRepo) Update(ctx context.Context, task Task) (*Task, error) {
 		update tasks
 		set title = $1, description = $2, completed = $3
 		where id = $4
-		returning id, user_id, title, description, completed
+		returning id, user_id, title, description, completed, word_count
 	`
 
 	err = tx.QueryRowContext(ctx, query, task.Title, task.Description, task.Completed, task.Id).
-		Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed)
+		Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed, &task.WordCount)
 	if err != nil {
 		tx.Rollback()
 		if errors.Is(err, sql.ErrNoRows) {
@@ -165,12 +166,12 @@ func (r *TaskRepo) Patch(ctx context.Context, id int, fields PatchTask) (*Task, 
 		    description = coalesce($2, description),
 		    completed = coalesce($3, completed)
 		where id = $4
-		returning id, user_id, title, description, completed
+		returning id, user_id, title, description, completed, word_count
 	`
 
 	var task Task
 	err := r.db.QueryRowContext(ctx, query, fields.Title, fields.Description, fields.Completed, id).
-		Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed)
+		Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed, &task.WordCount)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -207,7 +208,7 @@ func (r *TaskRepo) ListByUser(ctx context.Context, userId int, limit int, offset
 	}
 
 	query := `
-		select id, user_id, title, description, completed from tasks
+		select id, user_id, title, description, completed, word_count from tasks
 		where user_id = $1
 		order by id
 		limit $2 offset $3
@@ -222,7 +223,7 @@ func (r *TaskRepo) ListByUser(ctx context.Context, userId int, limit int, offset
 	var tasks []Task
 	for rows.Next() {
 		var task Task
-		if err := rows.Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed); err != nil {
+		if err := rows.Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Completed, &task.WordCount); err != nil {
 			return nil, fmt.Errorf("TaskRepo.ListByUser scan: %w", err)
 		}
 		tasks = append(tasks, task)
@@ -233,4 +234,14 @@ func (r *TaskRepo) ListByUser(ctx context.Context, userId int, limit int, offset
 	}
 
 	return tasks, nil
+}
+
+func (r *TaskRepo) UpdateWordCount(ctx context.Context, taskID int, wordCount int) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tasks SET word_count = $1 WHERE id = $2`,
+		wordCount, taskID)
+	if err != nil {
+		return fmt.Errorf("TaskRepo.UpdateWordCount: %w", err)
+	}
+	return nil
 }

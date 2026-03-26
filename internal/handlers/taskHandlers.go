@@ -5,17 +5,19 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/kurt4ins/taskmanager/internal/indexer"
 	"github.com/kurt4ins/taskmanager/internal/middleware"
 	"github.com/kurt4ins/taskmanager/internal/repo"
 	"github.com/kurt4ins/taskmanager/internal/utils"
 )
 
 type TaskHandler struct {
-	repo repo.TaskRepository
+	repo    repo.TaskRepository
+	indexer *indexer.Indexer
 }
 
-func NewTaskHandler(repo repo.TaskRepository) *TaskHandler {
-	return &TaskHandler{repo: repo}
+func NewTaskHandler(repo repo.TaskRepository, idx *indexer.Indexer) *TaskHandler {
+	return &TaskHandler{repo: repo, indexer: idx}
 }
 
 func checkOwner(w http.ResponseWriter, r *http.Request, task *repo.Task) bool {
@@ -51,6 +53,19 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(err.Error())
 		utils.WriteError(w, http.StatusInternalServerError, "failed to create task")
 		return
+	}
+
+	if h.indexer != nil {
+		ok := h.indexer.Submit(indexer.IndexJob{
+			TaskId:      task.Id,
+			Title:       task.Title,
+			Description: task.Description,
+		})
+
+		if !ok {
+			utils.WriteError(w, http.StatusServiceUnavailable, "indexer queue is full, try again later")
+			return
+		}
 	}
 
 	utils.WriteJSON(w, http.StatusCreated, task)
