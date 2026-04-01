@@ -73,7 +73,7 @@ func (h *ReportHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	// })
 
 	if err := g.Wait(); err != nil {
-		if r.Context().Err() != nil { // уточнить срабатывает ли это только при отключении клиента
+		if r.Context().Err() != nil {
 			fmt.Println("client has disconnected")
 			return
 		}

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package tasks;
+
+option go_package = "github.com/kurt4ins/taskmanager/gen";
+
+message Task {
+    string id          = 1;
+    string name        = 2;
+    string description = 3;
+    bool   completed   = 4;
+}
+
+message CreateTaskReq {
+    string name        = 1;
+    string description = 2;
+}
+
+message ListTasksReq {}
+
+service TaskService {
+    rpc CreateTask(CreateTaskReq) returns (Task);
+    rpc ListTasks(ListTasksReq)   returns (stream Task);
+}
